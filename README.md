@@ -50,20 +50,94 @@ npm run preview
 
 The example cloud API stores the full dashboard state as one JSON payload in a D1 row, simplifying import/export. For a larger multi-user product, normalized goals/subtasks/events tables and conflict resolution would be more appropriate.
 
-## Cloud sync — optional, **not connected by default**
+## Cloud sync — secure Cloudflare D1 (setup required)
 
-You don't need Azure to run the starter. The default app stores your goals in **this browser only** and backs them up with JSON export. For phone/laptop syncing, you must deploy a real API and enable account-level access protection.
+This repository includes a deployable **same-origin Cloudflare Worker + D1** backend
+with **Cloudflare Access single-user authentication** and revision checks.
+The database and Cloudflare account **have not been provisioned yet**.
 
-One possible path outside ChatGPT Sites is Cloudflare Workers + D1:
+### 1. Before starting
 
-1. Create a D1 database and apply `cloudflare/schema.sql` using Wrangler.
-2. Configure the Worker in `cloudflare/worker.js` with a D1 binding named `GOALS_DB`, an `ALLOWED_EMAIL` setting and the D1 database ID.
-3. **Before making the Worker reachable**, enforce Cloudflare Access with an identity policy protecting **both** the website and API hostname/route. Disable or protect any direct `workers.dev` or alternative routes. An email header alone is **not** a substitute for an Access policy and should never be treated as authentication on a publicly reachable Worker.
-4. Host the frontend in an Access-protected site and route `/api/store` to the Worker on the same origin, or configure a secured cross-origin frontend/API deployment with the appropriate CORS and cookie policy.
-5. Set `VITE_GOALS_API_URL` to the externally reachable protected API origin if using one. Don't put credentials or API keys in `VITE_` variables, because the frontend bundle is visible to browsers.
-6. Test loading, saving, access denied, logging out, backup/export and two-device sync before depending on the cloud copy.
+Run `npm install` locally. Export a **JSON backup** of your existing local goals.
+Browser localStorage belongs to its own hostname, so localhost data will not
+automatically be available at the deployed domain.
 
-**ChatGPT Sites note:** This starter does **not** directly connect to ChatGPT Sites' database or authenticate a user. When building the Site in Sites/Codex, the server-side data and auth layers must be adapted to whatever APIs and access controls that platform actually exposes. The mockup's “Private” label alone does not enforce privacy. The included Cloudflare Worker is an optional architectural example, not a required dependency or an automatically connected service.
+### 2. Create the database
+
+Sign in to Cloudflare and run:
+
+```bash
+npx wrangler login
+npx wrangler d1 create personal-goals-db
+```
+
+Copy `cloudflare/wrangler.example.toml` to `cloudflare/wrangler.toml`, then
+replace `REPLACE_WITH_YOUR_D1_DATABASE_ID` with the returned D1 UUID.
+The real wrangler configuration is gitignored.
+
+Create the remote schema:
+
+```bash
+npx wrangler d1 execute personal-goals-db --remote --file cloudflare/schema.sql --config cloudflare/wrangler.toml
+```
+
+Only if upgrading an existing D1 database from the prior no-revision schema,
+run the commented `ALTER TABLE` migration separately once.
+
+### 3. Configure sign-in before publishing
+
+Create a Cloudflare Zero Trust Access application for this Worker.
+Restrict access to **your email only**, protecting production, previews,
+and every other reachable hostname/route. A public GitHub repository is fine
+for code, but it must never contain real goals, tokens, or private notes.
+
+Find the Access team domain and application Audience (AUD) tag in your
+Cloudflare account. Configure Worker secrets by running:
+
+```bash
+npx wrangler secret put ACCESS_TEAM_DOMAIN --config cloudflare/wrangler.toml
+npx wrangler secret put ACCESS_AUD --config cloudflare/wrangler.toml
+npx wrangler secret put ALLOWED_EMAIL --config cloudflare/wrangler.toml
+```
+
+Enter the actual values only in the secure prompts, never in tracked source
+files. You can also configure Worker secrets from the Cloudflare dashboard.
+Do not rely only on a client-provided email header: the Worker verifies the
+signed Cloudflare Access JWT, its issuer, audience and matching email.
+
+### 4. Build/deploy *after* Access is configured
+
+```bash
+npm run cloud:deploy
+```
+
+Your Cloudflare Worker serves React static assets and the authenticated
+`/api/store` endpoint from the same origin.
+
+**Security checks are mandatory:** confirm that incognito or another email
+cannot open the dashboard or access the API, and that the approved account
+can create, refresh and sync a test goal. A deployment is not automatically private.
+
+### 5. Move your personal goals
+
+Open the new protected cloud URL and sign in. Under Settings, use
+**Import JSON Backup** to load the backup exported from your old localhost
+dashboard. Confirm your changes persist when you refresh and appear on
+your second device. Do not keep editing the old localhost copy.
+
+### Recovery and conflicts
+
+Each save includes the last known database revision. When another device
+has already saved newer data, the API responds `409` and the dashboard
+pauses editing to prevent silent overwrites. Export a local JSON backup
+and reconcile before reloading. This does not automatically merge conflicts.
+
+Keep periodic JSON exports as an independent backup. GitHub stores *code*,
+not your private D1 records.
+
+**ChatGPT Sites note:** This Cloudflare setup is an independent deployment.
+Connecting a ChatGPT Site to its built-in database requires adapting to
+that platform's authenticated server-side APIs.
 
 ## A few design choices
 
@@ -71,7 +145,7 @@ One possible path outside ChatGPT Sites is Cloudflare Workers + D1:
 - One recurring check-in is tracked per day; you can undo a check-in by clicking the checked day. For multi-session tracking on the same day, extend the events model to use distinct timestamps rather than unique date strings.
 - The progress history chart displays the average of the most recently updated measurable goals within each week, not a scientific fitness/consistency score. It intentionally leaves weeks with no data empty.
 - Editing a goal appends a timestamped history entry; there is no externally scheduled reminder or notifications service.
-- Cross-device simultaneous updates are **not** conflict-resolved in this starter; the optional cloud sync uses last-write-wins. For one user, avoid editing at the same time on multiple devices until conflict handling is built.
+- Cross-device conflicts return HTTP 409, and editing pauses. Export a JSON backup and reconcile manually; no automatic merge exists.
 - Keeping the V1 JSON backup is recommended before trying data migration.
 
 ## Suggested next steps before publishing

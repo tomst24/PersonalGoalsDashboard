@@ -1,12 +1,16 @@
-name = "personal-goals-dashboard-api"
-main = "worker.js"
-compatibility_date = "2026-11-01"
+# Copy to cloudflare/wrangler.toml and fill in your D1 UUID.
+# Do not commit your local wrangler.toml or secrets.
+name = "personal-goals-dashboard"
+main = "./worker.js"
+compatibility_date = "2026-11-14"
+
+[assets]
+directory = "../dist"
+binding = "ASSETS"
+not_found_handling = "single-page-application"
+run_worker_first = ["/api/*"]
 
 [[d1_databases]]
 binding = "GOALS_DB"
 database_name = "personal-goals-db"
 database_id = "REPLACE_WITH_YOUR_D1_DATABASE_ID"
-
-# Set ALLOWED_EMAIL securely in your Worker environment variables.
-# Apply Cloudflare Access restrictions to the Worker hostname/route itself,
-# including direct workers.dev addresses, before activating cloud sync.

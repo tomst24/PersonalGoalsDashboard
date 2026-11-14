@@ -191,28 +191,42 @@ export default function App(){
  const [selected,setSelected]=useState<string|null>(null);
  const [localError,setLocalError]=useState(false);
  const [cloudReady,setCloudReady]=useState(!CLOUD_API);
- const [cloudState,setCloudState]=useState(CLOUD_API?'Connecting…':'Browser local storage · no cloud sync');
+ const [cloudState,setCloudState]=useState(CLOUD_API?'Connecting to private cloud…':'Browser local storage · no cloud sync');
+ const cloudRevision=useRef(0);
+ const skipInitialSave=useRef(false);
  const savingQueue=useRef<Promise<void>>(Promise.resolve());
  useEffect(()=>{
   if(!CLOUD_API)return;
   let cancelled=false;
-  readCloud().then(remote=>{
+  readCloud().then(({store:remote,revision})=>{
    if(cancelled)return;
    const normalized=remote===null?null:normalizeStore(remote);
-   if(remote!==null&&!normalized)throw Error('Cloud database has an invalid data format');
+   if(remote!==null&&!normalized)throw Error('Cloud data has an invalid format');
+   cloudRevision.current=revision;
+   skipInitialSave.current=true;
    if(normalized)setData(normalized);
-   setCloudReady(true);setCloudState('Cloud connected · changes will sync');
-  }).catch(error=>{if(!cancelled){setCloudReady(false);setCloudState(`Cloud unavailable · changes are local only: ${String(error)}`);}});
+   setCloudState(normalized?'Cloud data loaded · ready':'Cloud database empty · import a JSON backup or create a goal');
+   setCloudReady(true);
+  }).catch(error=>{
+   if(!cancelled){setCloudReady(false);setCloudState('Cloud connection failed: '+String(error));}
+  });
   return()=>{cancelled=true;};
  },[]);
  useEffect(()=>{
   try{localStorage.setItem(KEY,JSON.stringify(data));setLocalError(false);}catch{setLocalError(true);}
   if(!CLOUD_API||!cloudReady)return;
+  if(skipInitialSave.current){skipInitialSave.current=false;return;}
   const timer=window.setTimeout(()=>{
    const payload=data;
    savingQueue.current=savingQueue.current.catch(()=>undefined).then(async()=>{
-    try{await writeCloud(payload);setCloudState('Saved to cloud');}
-    catch(error){setCloudState(`Cloud save failed (local copy retained): ${String(error)}`);}
+    try{
+     const revision=await writeCloud(payload,cloudRevision.current);
+     cloudRevision.current=revision;
+     setCloudState('Saved securely to cloud');
+    }catch(error){
+     setCloudReady(false);
+     setCloudState('Cloud save failed. Export a JSON backup before refreshing. '+String(error));
+    }
    });
   },750);
   return()=>clearTimeout(timer);
@@ -260,6 +274,19 @@ export default function App(){
  const edit=(g:Goal)=>{setEditing(g);setSelected(g.id);document.getElementById('goal-editor')?.scrollIntoView({behavior:'smooth',block:'nearest'});};
  const create=()=>{setEditing(makeGoal(data.categories[0]));document.getElementById('goal-editor')?.scrollIntoView({behavior:'smooth',block:'nearest'});};
  const select=(g:Goal)=>{setSelected(g.id);if(page==='dashboard')document.getElementById('goal-detail')?.scrollIntoView({behavior:'smooth',block:'nearest'});};
+ if(CLOUD_API&&!cloudReady){
+  return <div className="app-shell" style={{display:'grid',placeItems:'center',minHeight:'100vh',padding:24}}>
+   <section className="settings-card" style={{width:'min(600px,100%)',padding:28}}>
+    <h1>Private cloud connection required</h1>
+    <p>{cloudState}</p>
+    <p>Your browser's local copy has not been deleted. To avoid overwriting changes from another device, editing is paused until cloud storage is available.</p>
+    <div className="button-row">
+     <button className="primary-button" onClick={()=>window.location.reload()}>Retry connection</button>
+     <button className="subtle-btn" onClick={()=>downloadFile('my-goals-recovery-'+localDate()+'.json',JSON.stringify(data,null,2),'application/json')}>Export local backup</button>
+    </div>
+   </section>
+  </div>;
+ }
  return <div className="app-shell">
   <aside className="sidebar"><div className="brand"><div className="brand-mark">▲</div><b>My Goals</b></div><nav aria-label="Main navigation">{NAV.map(n=><button key={n.id} className={`nav-link ${page===n.id?'active':''}`} onClick={()=>{setPage(n.id);setFilters(emptyFilters);}}><span>{n.icon}</span>{n.label}</button>)}</nav><div className="inspiration"><span className="mountain">⛰</span><strong>Small steps,<br/>real progress</strong></div></aside>
   <main className="main-area"><header className="topbar"><div><div className="title-line"><h1>{PAGE_TITLE[page]}</h1><span className="private-tag">♙ Private</span></div><p>Your personal space to plan, track and achieve what matters.</p></div><div className="top-actions"><button className="subtle-btn" onClick={()=>downloadFile(`my-goals-${localDate()}.json`,JSON.stringify(data,null,2),'application/json')}>↓ Export Backup</button><button className="primary-button" onClick={create}>＋ Create Goal</button></div></header>
