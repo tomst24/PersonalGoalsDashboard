@@ -2,7 +2,7 @@ import type { Store } from './model';
 
 // Optional: configure a protected same-origin or Cloudflare Access-backed API.
 // Never put permanent API tokens in a VITE_ variable: browser bundles are public.
-export const CLOUD_API = (import.meta.env.VITE_GOALS_API_URL as string | undefined || '').replace(//$/, '');
+export const CLOUD_API = (import.meta.env.VITE_GOALS_API_URL as string | undefined || '').replace(/\/$/, '');
 
 export async function readCloud(): Promise<unknown> {
   const response = await fetch(`${CLOUD_API}/api/store`, { credentials: 'include', cache: 'no-store' });
