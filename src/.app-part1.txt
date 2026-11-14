@@ -1,0 +1,72 @@
+import {useEffect,useMemo,useRef,useState} from 'react';
+import type {ChangeEvent,FormEvent} from 'react';
+import {
+ CATEGORIES,CATEGORY_STYLE,STATUS_LABELS,countPeriod,csvOfGoals,displayDate,downloadFile,
+ initialStore,localDate,makeGoal,normalizeStore,progress,shiftDays,startPeriod,uid,valueAverage
+} from './model';
+import type {Goal,GoalStatus,HistoryEntry,Period,Priority,Store,Subtask,TrackerKind} from './model';
+import {CLOUD_API,readCloud,writeCloud} from './cloud';
+import './styles.css';
+
+type Page='dashboard'|'all'|'categories'|'recurring'|'history'|'completed'|'settings';
+type Filters={query:string;category:string;status:string;priority:string};
+const KEY='personal-goals-dashboard-v2';
+const LEGACY_KEY='personal-goals-dashboard-v1';
+const emptyFilters:Filters={query:'',category:'',status:'',priority:''};
+const NAV:{id:Page;icon:string;label:string}[]=[
+ {id:'dashboard',icon:'⌂',label:'Dashboard'},
+ {id:'all',icon:'◎',label:'All Goals'},
+ {id:'categories',icon:'▤',label:'Categories'},
+ {id:'recurring',icon:'↻',label:'Recurring'},
+ {id:'history',icon:'▥',label:'Progress History'},
+ {id:'completed',icon:'✓',label:'Completed'},
+ {id:'settings',icon:'⚙',label:'Settings'},
+];
+const PAGE_TITLE:Record<Page,string>={dashboard:'Goals & Targets Dashboard',all:'All Goals',categories:'Goals by Category',recurring:'Recurring Goals',history:'Progress History',completed:'Completed Goals',settings:'Settings'};
+function loadLocal():Store {
+ try {
+  for (const key of [KEY,LEGACY_KEY]) {
+   const raw=localStorage.getItem(key);
+   if (raw) {const parsed=normalizeStore(JSON.parse(raw));if (parsed) return parsed;}
+  }
+ } catch { /* In-memory fallback if browser storage is blocked. */ }
+ return initialStore();
+}
+function activityText(goal:Goal):string {
+ const t=goal.tracker;
+ if (t.kind==='checklist') return `${goal.subtasks.filter(s=>s.done).length} of ${goal.subtasks.length} milestones`;
+ if (t.kind==='recurring') return `${countPeriod(goal)} of ${t.target || '—'} this ${t.period==='daily'?'day':t.period==='weekly'?'week':'month'}`;
+ if (t.kind==='number') {
+  const val=t.dailyAverage ? valueAverage(goal) : t.current;
+  return val===null?'No values recorded':`${val.toLocaleString()} / ${t.target ? t.target.toLocaleString():'set target'} ${t.unit}${t.dailyAverage?' (7-day recorded avg)':''}`;
+ }
+ return '';
+}
+function ProgressBar({pct,small=false}:{pct:number|null;small?:boolean}) {
+ if (pct===null) return null;
+ return <div className={`progress-track ${small?'small':''}`} role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={pct}>
+  <div className="progress-fill" style={{width:`${pct}%`}} />
+ </div>;
+}
+function GoalMini({goal,onSelect,onToggle,onEdit}:{goal:Goal;onSelect:(g:Goal)=>void;onToggle:(g:Goal)=>void;onEdit:(g:Goal)=>void}) {
+ const pct=progress(goal);
+ return <article className={`goal-mini ${goal.status==='completed'?'done':''}`}>
+  <button className={`check-button ${goal.status==='completed'?'checked':''}`} onClick={()=>onToggle(goal)} aria-label={`Mark ${goal.title} ${goal.status==='completed'?'incomplete':'completed'}`}>{goal.status==='completed'?'✓':''}</button>
+  <div className="goal-mini-main">
+   <button className="goal-title-link" onClick={()=>onSelect(goal)}>{goal.title}</button>
+   <div className="ministat"><span className={`status-pill s-${goal.status}`}>{STATUS_LABELS[goal.status]}</span>{goal.tracker.kind!=='none'&&<span className="mini-ratio">{activityText(goal)}</span>}</div>
+   {pct!==null&&<div className="mini-progress"><ProgressBar pct={pct} small/><span>{pct}%</span></div>}
+   {goal.dueDate&&<span className="mini-date">◷ {displayDate(goal.dueDate)}</span>}
+  </div>
+  <button className="more-button" onClick={()=>onEdit(goal)} title={`Edit ${goal.title}`} aria-label={`Edit ${goal.title}`}>⋯</button>
+ </article>;
+}
+function CategoryGrid({goals,categories,onSelect,onToggle,onEdit}:{goals:Goal[];categories:string[];onSelect:(g:Goal)=>void;onToggle:(g:Goal)=>void;onEdit:(g:Goal)=>void}){
+ return <div className="category-grid">{categories.filter(c=>goals.some(g=>g.category===c)).map(category=>{
+  const list=goals.filter(g=>g.category===category);
+  const meta=CATEGORY_STYLE[category]||{icon:'◈',tint:'violet'};
+  return <section className="category-tile" key={category}>
+   <header className={`category-tile-header tint-${meta.tint}`}><span className="category-title"><i>{meta.icon}</i>{category}</span><span className="count-chip">{list.length} {list.length===1?'goal':'goals'}</span></header>
+   <div>{list.map(g=><GoalMini key={g.id} goal={g} onSelect={onSelect} onToggle={onToggle} onEdit={onEdit}/>)}</div>
+  </section>;
+ })}</div>;
