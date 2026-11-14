@@ -1,0 +1,12 @@
+name = "personal-goals-dashboard-api"
+main = "worker.js"
+compatibility_date = "2026-11-01"
+
+[[d1_databases]]
+binding = "GOALS_DB"
+database_name = "personal-goals-db"
+database_id = "REPLACE_WITH_YOUR_D1_DATABASE_ID"
+
+# Set ALLOWED_EMAIL securely in your Worker environment variables.
+# Apply Cloudflare Access restrictions to the Worker hostname/route itself,
+# including direct workers.dev addresses, before activating cloud sync.
